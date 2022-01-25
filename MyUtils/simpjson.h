@@ -18,7 +18,7 @@ public:
 	inline constexpr const T* get()const { return (T*)_data; }
 private:
 	void* _data;
-};
+}; 
 
 class _fake_union
 {

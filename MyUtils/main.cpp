@@ -90,93 +90,46 @@ public:
 	_ref_union _data;
 };
 
-template<typename _basic_type>
-class _initializer
-{
-public:
-
-	template<typename _basic_type>
-	friend class _obj_for_init;
-
-	class value
-	{
-	public:
-		constexpr static value empty_flag() { return value(-1); };
-
-		constexpr value(int siz) :_siz(siz) {}
-		constexpr value(_basic_type data) :_data(data) {}
-
-		constexpr bool is_empty_flag()const { return _siz < 0; }
-		constexpr bool is_size_flag()const { return _siz > 0; }
-		constexpr bool is_data()const { return _siz == 0; }
-
-		constexpr int get_size()const { return _siz; }
-		constexpr _basic_type get_data()const { return _data; }
-	private:
-		int _siz = 0;
-		_basic_type _data;
-	};
-
-	template<typename ..._ts>
-	_initializer(const _ts& ...args)
-	{
-		_vals = { _basic_type(args)... };
-	}
-
-	_initializer(std::initializer_list<_initializer> x)
-	{
-		for (auto& it : x)
-		{
-			_vals.insert(_vals.end(), it._vals.begin(), it._vals.end());
-			if (it._vals.empty())_vals.push_back(value::empty_flag());
-		}
-		_vals.push_back(value(x.size()));
-
-	}
-//private:
-	std::vector<value> _vals;
-};
-
 // 用于初始化的中间对象
 template<typename _basic_type>
 class _obj_for_init
 {
 public:
 
-	_obj_for_init()
-	{
-		_is_objs = false;
-		_data.element = 0;
-	}
-	_obj_for_init(const _obj_for_init& x) { assign(x); }
-	_obj_for_init(const _initializer<_basic_type>& x) :_is_objs(true)
-	{
-		_objs_t objs;
-		//objs.push_back(_obj_for_init());
+	using _objs_t = std::vector<_obj_for_init>;
 
-		for (int i = 0; i<int(x._vals.size()); ++i)
+	_obj_for_init() {}
+	_obj_for_init(const _obj_for_init& x) { assign(x); }
+	_obj_for_init(const _basic_type& x) :_element(x) {}
+	_obj_for_init(const _objs_t& x) :
+		_is_obj(true), _objs(x) {}
+
+	template<typename ..._ts>
+	_obj_for_init(const _ts& ...args)
+	{
+		_objs = { _basic_type(args)... };
+		if (_objs.size() > 1)_is_obj = true;
+		else
 		{
-			auto& it = x._vals[i];
-			if (it.is_size_flag())
-			{
-				//int n = it.get_size();
-				//_objs_t tmp;
-				//tmp.resize(n);
-				//std::copy(objs.end() - n, objs.end(), tmp.begin());
-				//objs.erase(objs.end() - n, objs.end());
-				//objs.push_back(_obj_for_init(tmp));
-			}
-			else if (it.is_empty_flag())
-			{
-				_objs_t a;
-				objs.push_back(_obj_for_init(a));
-			}
-			else
-			{
-				objs.push_back(_obj_for_init(i));
-			}
+			_element = _objs[0]._element;
+			_objs.clear();
 		}
 	}
+
+	_obj_for_init(std::initializer_list<_obj_for_init<_basic_type> > x)
+		:_is_obj(true)
+	{
+		for (auto& it : x)
+		{
+			if (it.is_obj())
+			{
+				_objs.push_back(it._objs);
+			}
+			else _objs.push_back(it._element);
+		}
+	}
+
+	constexpr bool is_obj()const { return _is_obj; }
 
 	_obj_for_init& operator=(const _obj_for_init& x)
 	{
@@ -186,38 +139,55 @@ public:
 
 	void assign(const _obj_for_init& x)
 	{
-		_is_objs = x._is_objs;
-		if (_is_objs) _data.objs = x._data.objs;
-		else _data.element = x._data.element;
+		if (x.is_obj()) _objs = x._objs;
+		else _element = x._element;
+		_is_obj = x._is_obj;
 	}
 
-private:
+//private:
 
-	using _objs_t = std::vector<_obj_for_init>;
+	bool _is_obj = false;
 
-	_obj_for_init(int idx) :_is_objs(false)
-	{
-		_data.element = idx;
-	}
-	_obj_for_init(const _objs_t& objs) :_is_objs(true)
-	{
-		_data.objs = objs;
-	}
-
-	bool _is_objs;
-	struct _data_t
-	{
-		_data_t() {}
-		~_data_t() {}
-		int element = 0;
-		_objs_t objs;
-	}_data;
-	
+	_basic_type _element;
+	_objs_t _objs;
 };
+
+//template<typename _basic_type>
+//class _initializer
+//{
+//public:
+//
+//	template<typename ..._ts>
+//	_initializer(const _ts& ...args)
+//	{
+//		_objs = { _obj_t(args)... };
+//	}
+//
+//	_initializer(std::initializer_list<_initializer> x)
+//	{
+//		for (auto& it : x)
+//		{
+//			if (it._objs.size() == 1)
+//			{
+//				_objs.push_back(it._objs[0]._element);
+//			}
+//			else
+//			_objs.push_back(it._objs);
+//		}
+//	}
+//
+////private:
+//	using _obj_t = _obj_for_init<_basic_type>;
+//
+//	bool _is
+//	std::vector<_obj_t> _objs;
+//
+//};
 
 int main()
 {
-	_initializer<_base_value_ref> xx={
+	_obj_for_init<_base_value_ref> xx = {
+		{"sss"},
 		{"pi", 3.141},
 		{"happy", true},
 		{"name", "Niels"},
@@ -273,20 +243,13 @@ int main()
 
 	//for (auto it : a)printf("%d ", it);
 
-	for (auto& it : xx._vals)
+	for (auto& it : xx._objs)
 	{
-		if (it.is_size_flag())
-			std::cout << it.get_size();
-		else if (it.is_empty_flag())std::cout << "$empty";
-		else std::cout << it.get_data().str_val();
-		puts("");
+		if (it.is_obj())printf("{...}:%d\n", it._objs.size());
+		else puts(it._element.str_val().c_str());
 	}
 
-	_obj_for_init<_base_value_ref> x(xx);
-
-	
-
-	_ref_union uu;
+	printf("%s", xx._objs[7]._objs[0]._element.str_val().c_str());
 
 	return 0;
 }
