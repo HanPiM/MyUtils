@@ -7,191 +7,436 @@
 
 #include <iostream>
 
-class _base_value_ref
+class _fake_union
 {
 public:
+
+	_fake_union() :_data(nullptr) {}
+	_fake_union(const _fake_union& x)
+	{
+		_data = nullptr;
+		_assign(x);
+	}
+	template<typename _t>
+	_fake_union(const _t& x)
+	{
+		_data = nullptr;
+		set(x);
+	}
+	const _fake_union& operator=(const _fake_union& x)
+	{
+		_assign(x);
+		return x;
+	}
+
+	~_fake_union()
+	{
+		_destroy_data();
+	}
+
+	inline constexpr bool empty()const
+	{
+		return _data == nullptr;
+	}
+	inline void clear()
+	{
+		_destroy_data();
+		_data = nullptr;
+	}
+
+	template<typename _t>
+	inline constexpr _t& get()
+	{
+		return *((_t*)_data);
+	}
+	template<typename _t>
+	inline constexpr const _t& get()const
+	{
+		return *((const _t*)_data);
+	}
+	// 如果原先为空则创建一个新对象再返回
+	template<typename _t>
+	inline constexpr _t& as()
+	{
+		if (empty())set(_t());
+		return get<_t>();
+	}
+	template<typename _t>
+	inline constexpr const _t& as()const
+	{
+		if (empty())return std::move(_t());
+		return get<_t>();
+	}
+
+	template<typename _t>
+	void set(const _t& x)
+	{
+		_destroy_data();
+		_destructor = [](void* p) {delete (_t*)p; };
+		_copy_constructor = [](void* x) {return new _t(*((_t*)x)); };
+		_data = new _t(x);
+	}
+
+private:
+
+	void* _data = nullptr;
+	std::function<void(void*)> _destructor;
+	std::function<void* (void*)> _copy_constructor;
+
+	void _destroy_data()
+	{
+		if (!empty()) _destructor(_data);
+		// 可以不设为空指针，因为该函数在内部使用，可确保调用后会赋值
+	}
+
+	void _assign(const _fake_union& x)
+	{
+		_destroy_data();
+		_destructor = x._destructor;
+		_copy_constructor = x._copy_constructor;
+		if (x._data != nullptr)
+			_data = _copy_constructor(x._data);
+		else _data = nullptr;
+	}
+};
+
+class basic_value_type
+{
+public:
+
 	enum
 	{
 		_empty,
 
+		null,
 		number_float,
 		number_integer,
 		boolean,
-		cstring,
 		string,
-		null
-	};
-	_base_value_ref() { _type = _empty; }
-	_base_value_ref(nullptr_t x)
-	{
-		_type = null;
-	}
-	_base_value_ref(const bool& x)
-	{
-		_type = boolean;
-		_data.set(&x);
-	}
-	_base_value_ref(const double& x)
-	{
-		_type = number_float;
-		_data.set(&x);
-	}
-	_base_value_ref(const int& x)
-	{
-		_type = number_integer;
-		_data.set(&x);
-	}
-	_base_value_ref(const char* x)
-	{
-		_type = cstring;
-		_data.set(x);
-	}
-	_base_value_ref(const std::string& x)
-	{
-		_type = string;
-		_data.set(&x);
-	}
 
-	std::string str_val()const
+		_basic_type_end
+	};
+
+	basic_value_type() :_type(_empty) {}
+	basic_value_type(nullptr_t x) :_type(null) {}
+	basic_value_type(const bool x) :_type(boolean), _data(x) {}
+	basic_value_type(const double x) :_type(number_float), _data(x) {}
+	basic_value_type(const int x) :_type(number_integer), _data(x) {}
+	basic_value_type(const char* x) :_type(string), _data(std::string(x)) {}
+	basic_value_type(const std::string& x) :_type(string), _data(x) {}
+
+	std::string basic_to_string()const
 	{
 		switch (_type)
 		{
 		case number_float:
-			return std::to_string(*_data.get<double>());
+			return std::to_string(_data.get<double>());
 		case number_integer:
-			return std::to_string(*_data.get<int>());
-		case cstring:return _data.get<char>();
-		case string:return *_data.get<std::string>();
+			return std::to_string(_data.get<int>());
+		case string:return _data.get<std::string>();
 		case null:return "null";
-		case boolean:return *_data.get<bool>() ? "true" : "false";
+		case boolean:return _data.get<bool>() ? "true" : "false";
 		case _empty:return "_empty";
 		}
 		return "unknown";
 	}
-
-	std::string type_name()const
+	virtual std::string to_string()const
 	{
-		switch (_type)
+		return basic_to_string();
+	}
+
+	inline constexpr int type()const { return _type; }
+	static const char* basic_type_name(int type)
+	{
+		switch (type)
 		{
 		case number_float:
 		case number_integer:
 			return "number";
-		case cstring:
-		case string:
-			return "string";
+		case string:return "string";
 		case null:return "null";
 		case boolean:return "boolean";
 		case _empty:return "_empty";
 		}
 		return "unknown";
 	}
+	virtual const char* type_name(int type)
+	{
+		return basic_type_name(type);
+	}
+	virtual std::string type_name()const
+	{
+		return basic_type_name(_type);
+	}
+
+private:
 
 	int _type;
-	_ref_union _data;
+	_fake_union _data;
 };
 
-// 用于初始化的中间对象
-template<typename _basic_type>
-class _obj_for_init
+template<typename _value_type>
+class json_base
 {
 public:
+	class object;
+	class array;
 
-	using _objs_t = std::vector<_obj_for_init>;
+	class data_t;
+	using _map_t = std::unordered_map<std::string, data_t>;
 
-	_obj_for_init() {}
-	_obj_for_init(const _obj_for_init& x) { assign(x); }
-	_obj_for_init(const _basic_type& x) :_element(x) {}
-	_obj_for_init(const _objs_t& x) :
-		_is_obj(true), _objs(x) {}
-
-	template<typename ..._ts>
-	_obj_for_init(const _ts& ...args)
+	class data_t
 	{
-		_objs = { _basic_type(args)... };
-		if (_objs.size() > 1)_is_obj = true;
-		else
+	public:
+
+		data_t() :_type(val), _data(_value_type()) {}
+		data_t(const data_t& x) { _assign(x); }
+		data_t(const array& x) { _assign(x); }
+		data_t(const object& x) { _assign(x); }
+
+		template<
+			typename _t,
+			typename std::enable_if <
+				std::is_constructible<_value_type, _t>::value, int
+			>::type = 0
+		>
+		data_t(const _t& x)
 		{
-			_element = _objs[0]._element;
-			_objs.clear();
+			_assign(_value_type(x));
 		}
-	}
 
-	_obj_for_init(std::initializer_list<_obj_for_init<_basic_type> > x)
-		:_is_obj(true)
-	{
-		for (auto& it : x)
+		const data_t& operator=(const data_t& x)
+		{ _assign(x); return x; }
+		const array& operator=(const array& x)
+		{ _assign(x); return x; }
+		const object& operator=(const object& x)
+		{ _assign(x); return x; }
+
+		enum
 		{
-			if (it.is_obj())
+			val,
+			arr,
+			obj,
+			_maybe_obj
+		};
+
+		inline int type()const { return _type; }
+		inline bool is_val()const { return _type == val; }
+		inline bool is_arr()const { return _type == arr; }
+		inline bool is_obj()const { return _type == obj; }
+
+		inline array& as_arr() { return _data.as<array>(); }
+		inline object& as_obj() { return _data.as<object>(); }
+		inline _value_type& as_val() { return _data.as<_value_type>(); }
+
+		inline const array& as_arr()const { return _data.as<array>(); }
+		inline const object& as_obj()const { return _data.as<object>(); }
+		inline const _value_type& as_val()const { return _data.as<_value_type>(); }
+
+		data_t& operator [](size_t idx)
+		{
+			if (!is_arr())
 			{
-				_objs.push_back(it._objs);
+				_type = arr;
+				_data.set(array());
 			}
-			else _objs.push_back(it._element);
+			return as_arr()[idx];
 		}
-	}
+		const data_t& operator [](size_t idx)const { return as_arr()[idx]; }
 
-	constexpr bool is_obj()const { return _is_obj; }
+		data_t& operator [](const std::string& key)
+		{
+			if (!is_obj())
+			{
+				_type = obj;
+				_data.set(object());
+			}
+			return as_obj()[key];
+		}
+		const data_t& operator[](const std::string& key)const
+		{ return as_obj()[key]; }
 
-	_obj_for_init& operator=(const _obj_for_init& x)
+		bool empty()const
+		{
+			if (is_arr())return as_arr().empty();
+			if (is_obj())return as_obj().empty();
+			return false;
+		}
+		inline void clear()
+		{
+			_data.clear();
+		}
+
+
+	private:
+
+		void _assign(const data_t& x)
+		{
+			_type = x._type;
+			_data = x._data;
+		}
+		template<typename _t, int _t_id>
+		void _assign(const _t& x)
+		{
+			if (_type == _t_id)_data.as<_t>() = x;
+			else
+			{
+				_data.set(x);
+				_type = _t_id;
+			}
+		}
+		inline void _assign(const _value_type& x)
+		{ _assign<_value_type, val>(x); }
+		inline void _assign(const array& x)
+		{ _assign<array, arr>(x); }
+		inline void _assign(const object& x)
+		{ _assign<object, obj>(x); }
+
+		friend class object;
+		friend class array;
+		friend class _obj_for_init;
+		
+		int _type;
+		_fake_union _data;
+	};
+
+	class object :public _map_t
 	{
-		assign(x);
-		return *this;
-	}
+	public:
 
-	void assign(const _obj_for_init& x)
+	};
+
+	class _obj_for_init
 	{
-		if (x.is_obj()) _objs = x._objs;
-		else _element = x._element;
-		_is_obj = x._is_obj;
-	}
+	public:
+		/*
+		* {a,b,c} : 这种情况会对每一个元素调用该函数来初始化
+		*  ^
+		*/
+		template<typename _t>
+		_obj_for_init(const _t& x) :_data(x) {}
+		/*
+		* (a,b,c) 或 {}
+		* ^^^^^^^
+		* 会调用该函数来初始化
+		*/
+		template<typename ..._ts>
+		_obj_for_init(const _ts& ...args)
+		{
+			auto& x = _data = array({ data_t(args)... });
+		}
+		_obj_for_init(std::initializer_list<_obj_for_init> x)
+		{
+			bool is_obj = true;
+			for (auto& it : x)
+			{
+				const auto& node = it._data;
+				if ((!node.is_arr()) || node.as_arr().size() != 2)
+				{
+					is_obj = false;
+					break;
+				}
+				const auto& first = node.as_arr()[0];
+				if ((!first.is_val()) || first.as_val().type() != _value_type::string)
+				{
+					is_obj = false;
+					break;
+				}
+			}
+			if (is_obj)
+			{
+				_data = object();
+				for (auto& it : x)
+				{
+					_data.as_obj()[it._data.as_arr()[0].as_val().to_string()] = it._data.as_arr()[1];
+				}
+				return;
+			}
+			_data = array();
+			for (auto& it : x)
+			{
+				_data.as_arr().push_back(it._data);
+			}
+		}
 
-//private:
+		data_t& data() { return _data; }
+		const data_t& data()const { return _data; }
 
-	bool _is_obj = false;
+	private:
 
-	_basic_type _element;
-	_objs_t _objs;
+		data_t _data;
+	};
+
+	class array :public std::vector<data_t>
+	{
+	public:
+		using _base_t = std::vector<data_t>;
+		array() : _base_t() {}
+		array(std::initializer_list<_obj_for_init> x)
+		{
+			for (auto& it : x)
+			{
+				this->push_back(it.data());
+			}
+		}
+	};
+
+private:
+
 };
 
-//template<typename _basic_type>
-//class _initializer
-//{
-//public:
-//
-//	template<typename ..._ts>
-//	_initializer(const _ts& ...args)
-//	{
-//		_objs = { _obj_t(args)... };
-//	}
-//
-//	_initializer(std::initializer_list<_initializer> x)
-//	{
-//		for (auto& it : x)
-//		{
-//			if (it._objs.size() == 1)
-//			{
-//				_objs.push_back(it._objs[0]._element);
-//			}
-//			else
-//			_objs.push_back(it._objs);
-//		}
-//	}
-//
-////private:
-//	using _obj_t = _obj_for_init<_basic_type>;
-//
-//	bool _is
-//	std::vector<_obj_t> _objs;
-//
-//};
+using basic_json = json_base<basic_value_type>;
 
 int main()
 {
-	_obj_for_init<_base_value_ref> xx = {
-		{"sss"},
-		{"pi", 3.141},
-		{"happy", true},
-		{"name", "Niels"},
-		{"nothing", nullptr},
+	
+	std::string s = "123ww";
+	double d = 3.141;
+
+	using json_t = basic_json;
+
+	json_t::array arr_test(
+	{
+		{
+			{
+				{
+					
+					{
+						1,2,3,4,5
+					},
+					1
+				}
+			}
+		}
+	});
+
+	std::cout << arr_test.size() << "________\n";
+	std::cout << arr_test[0][0].as_arr().size() << std::endl;
+
+	json_t::_obj_for_init obj_for_init_test =
+	{
+		{
+			{
+				{
+					1,2,3,4,5
+				},
+				1
+			}
+		}
+	};
+	std::cout << obj_for_init_test.data()[0][0].as_arr().size() << '\n';
+
+	json_base<basic_value_type>::_obj_for_init xx = 
+	{
+		1,2,3,4,d,
+		s,
+		arr_test,
+		{
+			{"pi", 3.141},
+			{"happy", true},
+			{"name", "Niels"},
+			{"nothing", nullptr},
+		},
 		{"answer",
 			{
 				{
@@ -204,9 +449,7 @@ int main()
 				{},{},{},{},{}
 			}
 		},
-		{
-			"list", {1, 0, 2}
-		},
+		{"list", {1, 0, 2}},
 		{
 			"object",
 			{
@@ -235,21 +478,25 @@ int main()
 		}
 	};
 	
-	//std::vector<int> a = { 1,2,3,4,5,6,7,8,9 }, b;
-	//b.resize(5);
-	//std::move(a.end()-5, a.end(), b.begin());
-	//a.erase(a.end() - 5, a.end());
-	//a.insert(a.begin(), b.begin(), b.end());
+	s = "s";
+	d = 999;
+	arr_test.push_back(114514);
 
-	//for (auto it : a)printf("%d ", it);
-
-	for (auto& it : xx._objs)
+	for (auto& it : xx.data().as_arr())
 	{
-		if (it.is_obj())printf("{...}:%d\n", it._objs.size());
-		else puts(it._element.str_val().c_str());
+		if (it.is_arr())printf("[...]:%d\n", it.as_arr().size());
+		else if (it.is_obj())
+		{
+			printf("{obj}\n");
+		}
+		else if(it.is_val())printf(":'%s'\n",it.as_val().to_string().c_str());
+		else
+		{
+
+		}
 	}
 
-	printf("%s", xx._objs[7]._objs[0]._element.str_val().c_str());
+	//printf("%s", xx._objs[7]._objs[0]._element.str_val().c_str());
 
 	return 0;
 }
