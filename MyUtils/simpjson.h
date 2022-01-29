@@ -272,19 +272,6 @@ public:
 		_assign(x); return x;
 	}
 
-	inline json_type type()const { return _type; }
-	inline bool is_value()const { return _type == json_type::value; }
-	inline bool is_array()const { return _type == json_type::array; }
-	inline bool is_object()const { return _type == json_type::object; }
-
-	inline array& as_array() { return _data.as<array>(); }
-	inline object& as_object() { return _data.as<object>(); }
-	inline _value_type& as_value() { return _data.as<_value_type>(); }
-
-	inline const array& as_array()const { return _data.as<array>(); }
-	inline const object& as_object()const { return _data.as<object>(); }
-	inline const _value_type& as_value()const { return _data.as<_value_type>(); }
-
 	template<typename _t>
 	explicit operator const _t()const
 	{
@@ -313,8 +300,25 @@ public:
 	}
 	const json_base& operator[](const std::string& key)const
 	{
-		return as_object()[key];
+		static json_base _empty_res;
+		const auto& obj = as_object();
+		const auto& it = obj.find(key);
+		if (it != obj.end())return it->second;
+		return _empty_res;
 	}
+
+	inline json_type type()const { return _type; }
+	inline bool is_value()const { return _type == json_type::value; }
+	inline bool is_array()const { return _type == json_type::array; }
+	inline bool is_object()const { return _type == json_type::object; }
+
+	inline array& as_array() { return _data.as<array>(); }
+	inline object& as_object() { return _data.as<object>(); }
+	inline _value_type& as_value() { return _data.as<_value_type>(); }
+
+	inline const array& as_array()const { return _data.as<array>(); }
+	inline const object& as_object()const { return _data.as<object>(); }
+	inline const _value_type& as_value()const { return _data.as<_value_type>(); }
 
 	bool empty()const
 	{
@@ -327,6 +331,76 @@ public:
 		_data.clear();
 	}
 
+	std::string dump(const std::string& tab="  ")const
+	{
+		std::string res;
+		dump(res, tab);
+		return res;
+	}
+	void dump(std::string& dest, const std::string& tab = "  ", int deep = 0)const
+	{
+		bool need_tab = !tab.empty();
+		auto add_tabs = [&need_tab, &dest, &tab, &deep]()
+		{
+			if (need_tab)
+				for (int i = 0; i < deep; ++i)dest += tab;
+		};
+		// 规定如果 deep < 0 则此次不输出（用于 object 的输出）
+		if (deep < 0)deep = -deep;
+		else add_tabs();
+
+		if (is_array())
+		{
+			dest += '[';
+			const auto& arr = as_array();
+			if (need_tab && !arr.empty())dest += '\n';
+			for (auto it = arr.begin(); it != arr.end(); ++it)
+			{
+				if (it != arr.begin())dest += need_tab ? ",\n" : ",";
+				it->dump(dest, tab, deep + 1);
+			}
+			if (need_tab && !arr.empty())
+			{
+				dest += '\n';
+				add_tabs();
+			}
+			dest += ']';
+		}
+		else if (is_object())
+		{
+			dest += '{';
+			const auto& obj = as_object();
+			if (need_tab && !obj.empty())dest += '\n';
+			deep++;
+			for (auto it = obj.begin(); it != obj.end(); ++it)
+			{
+				if (it != obj.begin())dest += need_tab ? ",\n" : ",";
+				add_tabs();
+				dest += '"';
+				dest += it->first;
+				dest += "\": ";
+				it->second.dump(dest, tab, -deep);
+			}
+			deep--;
+			if (need_tab && !obj.empty())
+			{
+				dest += '\n';
+				add_tabs();
+			}
+			dest += '}';
+		}
+		else if (is_value())
+		{
+			bool flag = (as_value().type() == _value_type::string);
+			if (flag)dest += '"';
+			dest += as_value().to_string();
+			if (flag)dest += '"';
+		}
+		else
+		{
+			dest += "unknown";
+		}
+	}
 
 private:
 
@@ -439,7 +513,8 @@ private:
 	_fake_union _data;
 };
 
-
 using json = json_base<basic_value_type>;
+
+
 
 }

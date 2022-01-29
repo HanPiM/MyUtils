@@ -155,6 +155,7 @@ int main()
 		}
 	}
 
+	std::cout << xx.dump();
 	//printf("%s", xx._objs[7]._objs[0]._element.str_val().c_str());
 
 	return 0;
