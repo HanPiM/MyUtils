@@ -1,1 +1,5 @@
+---
+permalink:/ababa.html
+---
+
 # ssss
