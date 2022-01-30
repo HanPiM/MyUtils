@@ -1,0 +1,3 @@
+# sjson
+
+simple json
